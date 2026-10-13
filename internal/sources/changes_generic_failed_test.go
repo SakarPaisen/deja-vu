@@ -34,3 +34,34 @@ func TestGenericChangesSkipsFailedEditCalls(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", strings.Join(got, " "), want)
 	}
 }
+
+// The same holds for a patch: an apply_patch call marked failed applied
+// nothing, so its text is not a change either.
+func TestGenericChangesSkipsAFailedPatchCall(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEJA_GEMINI_ROOT", root)
+	_, chats := geminiTree(t)
+	patch := `*** Begin Patch\n*** Update File: /Users/x/coding/gateway/pool.go\n@@\n-MaxConns: 10\n+MaxConns: 40\n*** End Patch`
+	call := func(id, status string) string {
+		return `{"id":"` + id + `","name":"apply_patch","args":{"input":"` + patch + `"},"status":"` + status + `"}`
+	}
+	lines := `{"sessionId":"sess-failed-patch-1","projectHash":"abc","startTime":"2026-07-20T21:07:00.000Z","lastUpdated":"2026-07-20T21:08:00.000Z","kind":"main"}
+{"id":"u1","timestamp":"2026-07-20T21:07:01.000Z","type":"user","content":[{"text":"edit pool.go"}]}
+{"id":"g1","timestamp":"2026-07-20T21:07:02.000Z","type":"gemini","content":"","model":"gemini-3","toolCalls":[` + call("p1", "error") + `]}
+`
+	p := filepath.Join(chats, "session-2026-07-20T21-07-sess-failed-patch-1.jsonl")
+	if err := os.WriteFile(p, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := model.Session{Harness: "gemini", ID: "sess-failed-patch-1", Path: p}
+	if got := Changes(s); len(got) != 0 {
+		t.Fatalf("a failed apply_patch came back as %d changes: %+v", len(got), got)
+	}
+	// The control: the same call marked success is read.
+	if err := os.WriteFile(p, []byte(strings.Replace(lines, `"status":"error"`, `"status":"success"`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := Changes(s); len(got) != 1 {
+		t.Fatalf("a successful apply_patch came back as %d changes", len(got))
+	}
+}

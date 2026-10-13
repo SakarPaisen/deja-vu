@@ -17,8 +17,8 @@ import (
 const genericChangesMaxBytes = 64 << 20
 
 // Field names the agents put on an edit call. Most coding agents took their
-// edit tool's shape from one another â€” a path, the text replaced and the text
-// it became â€” and differ only in spelling (Kimi and Cursor write old_string,
+// edit tool's shape from one another — a path, the text replaced and the text
+// it became — and differ only in spelling (Kimi and Cursor write old_string,
 // Copilot CLI old_str, opencode oldString).
 var (
 	editPathKeys    = []string{"file_path", "filePath", "path", "absolute_path", "target_file", "filename"}
@@ -30,9 +30,9 @@ var (
 	// toolArgKeys hold a tool call's arguments beside its name. An edit is
 	// only taken from inside one: the same shape in a system prompt, a tool
 	// schema or a read result is not a change the session made.
+	toolArgKeys = map[string]bool{"input": true, "arguments": true, "args": true, "parameters": true, "params": true, "rawInput": true, "raw_input": true}
 	// callStatusKeys name the field a harness marks a failed call with.
 	callStatusKeys = []string{"status", "callStatus", "toolStatus", "resultStatus"}
-	toolArgKeys    = map[string]bool{"input": true, "arguments": true, "args": true, "parameters": true, "params": true, "rawInput": true, "raw_input": true}
 )
 
 // writeToolName is a tool that writes a whole file. A path with content is
@@ -43,8 +43,8 @@ var writeToolName = regexp.MustCompile(`(?i)write|create|save|new_?file`).MatchS
 // genericChanges reads the edits out of a JSON or JSONL transcript whose
 // harness has no reader of its own here: every object shaped like an edit
 // call, every apply_patch text, in the order the file holds them. Only for a
-// file that holds this one session â€” read back from a store that keeps many
-// sessions in one file, one session would show another's code â€” so the file
+// file that holds this one session — read back from a store that keeps many
+// sessions in one file, one session would show another's code — so the file
 // is parsed by its own harness first and must come back as one session.
 func genericChanges(s model.Session) []Change {
 	if ext := strings.ToLower(path.Ext(s.Path)); ext != ".json" && ext != ".jsonl" {
@@ -120,7 +120,7 @@ func (w *editWalker) walk(v any, call string, failed bool, inArgs bool, depth in
 				return
 			}
 		}
-		if !inArgs {
+		if !inArgs || failed {
 			return
 		}
 		for _, patch := range patchTexts(t, 0) {
@@ -149,11 +149,9 @@ func (w *editWalker) walk(v any, call string, failed bool, inArgs bool, depth in
 		sort.Strings(keys)
 		for _, k := range keys {
 			if name != "" && toolArgKeys[k] {
-
 				// A tool call object may carry its own status beside the
 				// arguments: Gemini marks a refused call "error" there.
-				status, _ := firstStringFieldOK(t, callStatusKeys)
-				w.walk(t[k], name, failedCall(status), true, depth+1)
+				w.walk(t[k], name, failedCall(firstStringField(t, callStatusKeys)), true, depth+1)
 				continue
 			}
 			w.walk(t[k], call, failed, inArgs, depth+1)
@@ -174,14 +172,11 @@ func failedCall(status string) bool {
 // edit takes the change an argument object describes, if it describes one.
 func (w *editWalker) edit(t map[string]any, call string, failed bool) {
 	p := firstStringField(t, editPathKeys)
-	if p == "" {
+	if p == "" || failed {
 		return
 	}
 	old, oldOK := firstStringFieldOK(t, editOldKeys)
 	nw, newOK := firstStringFieldOK(t, editNewKeys)
-	if failed {
-		return
-	}
 	switch {
 	case oldOK && newOK:
 		w.add(Change{Path: p, Old: old, New: nw})
